@@ -113,7 +113,7 @@ NSInteger GateKeeperRuleComparator(id object1, id object2, void *context) {
 void usage(void) {
 	printf("Overview: Allows users to modify and view the list of GateKeeper rules that are enforced on their system.\n");
 	printf("\n");
-	printf("Usage: %s [add|list|remove|enable|disable] ...\n", getprogname());
+	printf("Usage: sudo %s [add|list|remove|enable|disable] ...\n", getprogname());
 	printf("\n");
 	printf("Options:\n");
 	printf("\tadd ...\n");
