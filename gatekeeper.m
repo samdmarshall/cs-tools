@@ -16,14 +16,14 @@ CFDictionaryRef ComposeSecContext(CFStringRef operation) {
 
 NSDictionary * PerformFind(CFErrorRef *error) {
 	CFDictionaryRef query_context = ComposeSecContext(kSecAssessmentUpdateOperationFind);
-	NSDictionary *result = (__bridge NSDictionary *)SecAssessmentCopyUpdate(NULL, 0, query_context, error);
+	NSDictionary *result = (__bridge NSDictionary *)SecAssessmentCopyUpdate(NULL, kSecAssessmentDefaultFlags, query_context, error);
 	return result;
 }
 
 bool PerformQuery(NSURL *item, CFStringRef operation, CFErrorRef *error) {
 	CFURLRef path = (__bridge CFURLRef)item;
 	CFDictionaryRef query_context = ComposeSecContext(operation);
-	bool result = SecAssessmentUpdate(path, 0, query_context, error);
+	bool result = SecAssessmentUpdate(path, kSecAssessmentDefaultFlags, query_context, error);
 	return result;
 }
 
@@ -111,18 +111,42 @@ int main(int argc, char *argv[]) {
 		
 		if (valid_command) {
 
-			AuthorizationRef auth_ref;
+			AuthorizationRef auth_ref = NULL;
 
 			// retrieve the data from the security APIs
-			AuthorizationCreate(NULL, kAuthorizationEmptyEnvironment, kAuthorizationFlagDefaults, &auth_ref);
-			AuthorizationExternalForm ext_form;
+			OSStatus create_status = AuthorizationCreate(NULL, kAuthorizationEmptyEnvironment, kAuthorizationFlagDefaults, &auth_ref);
+			if (create_status != errAuthorizationSuccess) {
+				printf("Error: unable to create authorization :(\n");
+				abort();
+			}
+			
+			AuthorizationItem right = { 
+				.name = "com.apple.security.assessment.update", 
+				.valueLength = 0, 
+				.value = NULL, 
+				.flags = 0
+			};
+			AuthorizationRights rights = {
+				.count = 1,
+				.items = &right
+			};
+					
+			AuthorizationFlags flags = kAuthorizationFlagExtendRights | kAuthorizationFlagPreAuthorize;
+			AuthorizationEnvironment *environment = kAuthorizationEmptyEnvironment;
+					
+			OSStatus copy_status = AuthorizationCopyRights(auth_ref, &rights, environment, flags, NULL);
+			if (copy_status != errAuthorizationSuccess) {
+				printf("Error: Unable to acquire permissions, please run with 'sudo'.\n");
+				return 0;
+			}
+			
+			AuthorizationExternalForm ext_form = {};
 			if (AuthorizationMakeExternalForm(auth_ref, &ext_form) == noErr) {
 				kGateKeeperAuthKey = [NSData dataWithBytes:&ext_form length:sizeof(ext_form)];
 			}
 
 			CFErrorRef find_error = NULL;
 			NSDictionary<NSString *, NSArray *> *query_result = PerformFind(&find_error);
-
 			NSArray<NSDictionary<NSString *, NSString*> *> *found_items_array = [query_result objectForKey:(__bridge id)kSecAssessmentUpdateKeyFound];
 			found_items_array = [found_items_array sortedArrayUsingFunction:GateKeeperRuleComparator context:NULL];
 
@@ -188,8 +212,23 @@ int main(int argc, char *argv[]) {
 						}
 
 						NSNumber *disabled_value = [item objectForKey:(__bridge NSString *)kSecAssessmentRuleKeyDisabled];
-						bool is_disabled = [disabled_value boolValue];
-						printf("\tDisabled: %s\n", BooleanToString(is_disabled));
+						int is_disabled = [disabled_value intValue];
+						char *disabled_string = NULL;
+						if (is_disabled == 0) {
+							disabled_string = "no";
+						}
+						else if (is_disabled < 0) {
+							disabled_string = "yes";
+						}
+						else {
+							disabled_string = "yes (temporarily)";
+						}
+						
+						if (disabled_string and strlen(disabled_string) > 0) {
+							printf("\tDisabled: %s\n", disabled_string);
+						}
+
+						printf("\n");
 					}
 				}
 
@@ -242,6 +281,8 @@ int main(int argc, char *argv[]) {
 				}
 
 			}
+
+			AuthorizationFree(auth_ref, kAuthorizationFlagDefaults);
 			
 		}
 		else {
