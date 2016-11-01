@@ -177,6 +177,11 @@ int main(int argc, char *argv[]) {
 							printf("\tRemarks: %s\n", [remarks_value UTF8String]);
 						}
 
+						NSString *type_value = [item objectForKey:(__bridge NSString *)kSecAssessmentRuleKeyType];
+						if ([type_value length] > 0) {
+							printf("\tType: %s\n", [type_value UTF8String]);
+						}
+
 						NSString *requirement_value = [item objectForKey:(__bridge NSString *)kSecAssessmentRuleKeyRequirement];
 						if ([requirement_value length] > 0) {
 							printf("\tRequirement: %s\n", [requirement_value UTF8String]);
