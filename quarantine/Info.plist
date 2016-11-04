@@ -3,19 +3,14 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>com.pewpewthespells.guardian</string>
+	<string>com.pewpewthespells.quarantine</string>
 	<key>CFBundleName</key>
-	<string>guardian</string>
+	<string>quarantine</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
-	<key>SecTaskAccess</key>
-	<array>
-		<string>allowed</string>
-		<string>safe</string>
-	</array>
 </dict>
 </plist>
