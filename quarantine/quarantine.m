@@ -36,7 +36,7 @@ void set_quarantine_on_file(NSURL *file_url) {
 }
 
 void usage(void) {
-	printf("Overview: Allows users to add the quarantine flag set on files or directories.\n");
+	printf("Overview: Allows users to add the quarantine flag onto files or directories.\n");
 	printf("\n");
 	printf("Usage: %s [path]\n", getprogname());
 }
@@ -56,11 +56,7 @@ int main(int argc, char *argv[]) {
 				NSDirectoryEnumerator *directory_enumerator = [file_manager enumeratorAtPath:file_path];
 				for (NSString *path in directory_enumerator) {
 					NSURL *found_path = [NSURL fileURLWithPathComponents:@[file_path, path]];
-					BOOL path_is_directory = NO;
-					bool path_exists = [file_manager fileExistsAtPath:[found_path absoluteString] isDirectory:&path_is_directory];
-					if (path_exists and not path_is_directory) {
-						set_quarantine_on_file(found_path);
-					}
+					set_quarantine_on_file(found_path);
 				}
 			}
 			else {
