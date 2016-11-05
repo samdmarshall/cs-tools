@@ -27,10 +27,7 @@ Boolean LookupSigningCertByType(CFDataRef *signing_cert, CFStringRef type) {
 	CFDictionaryAddValue(search, kSecMatchLimit, kSecMatchLimitAll);
 	OSStatus status = SecItemCopyMatching(search, &results);
 	if (status == errSecSuccess) {
-		status = SecItemExport(results, kSecFormatX509Cert, 0, NULL, signing_cert);
-		if (status == errSecSuccess) {
-			found_cert = true;
-		}
+		found_cert = true;		
 	}
 	return found_cert;
 }
@@ -43,7 +40,7 @@ void usage(void) {
 }
 
 int main(int argc, char *argv[]) {
-	Boolean result = 1;
+	Boolean result = 2;
 	@autoreleasepool {
 		NSArray *arguments = [[NSProcessInfo processInfo] arguments];
 		NSString *type = [arguments lastObject];
@@ -51,13 +48,13 @@ int main(int argc, char *argv[]) {
 		bool valid_command = ([arguments count] == 2);
 		if (valid_command) {
 			if ([type isEqualToString:@"iphone"]) {
-				result = not LookupSigningCertByType(&signing_cert, CFSTR("iPhone Developer:"));
+				result = LookupSigningCertByType(&signing_cert, CFSTR("iPhone Developer"));
 			}
 			else if ([type isEqualToString:@"macos"]) {
-				result = not LookupSigningCertByType(&signing_cert, CFSTR("Mac Developer:"));
+				result = LookupSigningCertByType(&signing_cert, CFSTR("Mac Developer"));
 			}
 			else if ([type isEqualToString:@"developerid"]) {
-				result = not LookupSigningCertByType(&signing_cert, CFSTR("Developer ID Application:"));
+				result = LookupSigningCertByType(&signing_cert, CFSTR("Developer ID"));
 			}
 			else {
 				usage();
@@ -67,5 +64,5 @@ int main(int argc, char *argv[]) {
 			usage();
 		}
 	}
-	return result;
+	return not (result == 1);
 }
