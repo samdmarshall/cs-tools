@@ -29,9 +29,9 @@ quarantine: pre-build
 	$(MAKE) -C quarantine
 	$(MAKE) sign-product
 
-siginfo: export PRODUCT_NAME = siginfo
-siginfo: pre-build
-	$(MAKE) -C siginfo
+signature: export PRODUCT_NAME = signature
+signature: pre-build
+	$(MAKE) -C signature
 	$(MAKE) sign-product
 
 clean:

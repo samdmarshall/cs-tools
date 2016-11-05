@@ -8,6 +8,12 @@ enum status {
 	success = 0,
 	too_short,
 	invalid_header,
+	invalid_binary,
+};
+
+struct lc_code_signature {
+	uint32_t offset;
+	uint32_t size;
 };
 
 void print_vax(cpu_subtype_t type) {
@@ -113,70 +119,70 @@ void print_arch(cpu_type_t cpu, cpu_subtype_t type) {
 	type = type & ~CPU_SUBTYPE_MASK;
 	switch (cpu) {
 		case CPU_TYPE_VAX: {
-			printf("- VAX -");
+			printf("VAX -");
 			print_vax(type);
 			break;
 		}
 		case CPU_TYPE_MC680x0: {
-			printf("- MC680x0 -");
+			printf("MC680x0 -");
 			print_mc680x0(type);
 			break;
 		}
 		case CPU_TYPE_X86: {
-			printf("- i386 -");
+			printf("i386 -");
 			print_i386(type);
 			break;
 		}
 		case CPU_TYPE_X86_64: {
-			printf("- x86_64 -");
+			printf("x86_64 -");
 			print_x86_64(type);
 			break;
 		}
 		case CPU_TYPE_HPPA: {
-			printf("- HPPA -");
+			printf("HPPA -");
 			print_hppa(type);
 			break;
 		}  
 		case CPU_TYPE_ARM: {
-			printf("- ARM -");
+			printf("ARM -");
 			print_arm(type);
 			break;
 		}
 		case CPU_TYPE_MC88000: {
-			printf("- m88k -");
+			printf("m88k -");
 			print_mc88000(type);
 			break;
 		}
 		case CPU_TYPE_SPARC: {
-			printf("- SPARC -");
+			printf("SPARC -");
 			print_sparc(type);
 			break;
 		}
 		case CPU_TYPE_I860: {
-			printf("- i860 -");
+			printf("i860 -");
 			break; 
 		}
 		case CPU_TYPE_POWERPC: {
-			printf("- PPC -");
+			printf("PPC -");
 			print_ppc(type);
 			break;
 		}
 		case CPU_TYPE_POWERPC64: {
-			printf("- PPC64 -");
+			printf("PPC64 -");
 			print_ppc64(type);
 			break;
 		}
 		case CPU_TYPE_ARM64: {
-			printf("- ARM64 -");
+			printf("ARM64 -");
 			print_arm64(type);
 			break;
 		}
 		case CPU_TYPE_ANY: {
-			printf("- any");
+			printf("any");
 			break;
 		}
 		default: {
-			printf("- %10d", cpu);
+			printf("%10d", cpu);
 			break;
 		}
 	}
@@ -184,9 +190,61 @@ void print_arch(cpu_type_t cpu, cpu_subtype_t type) {
 	printf("\n");
 }
 
+uint64_t parse_header(NSData *data, bool *is_valid_binary, enum status *reason, uint64_t index);
+
+uint64_t parse_slice_header(NSData *data, uint32_t magic, bool *is_valid_binary, enum status *reason, uint64_t index) {
+
+	uint64_t slice_offset = 0;
+
+	switch (magic) {
+		case FAT_MAGIC:
+		case FAT_CIGAM: {
+			struct fat_arch header = {};
+			@try {
+				[data getBytes:&header range:NSMakeRange(index, sizeof(header))];
+				slice_offset = header.offset;
+				index += sizeof(struct fat_arch);
+			}
+			@catch(NSException *exception) {
+				*is_valid_binary = false;
+				*reason = invalid_header;
+			}
+			break;
+		}
+		case FAT_MAGIC_64:
+		case FAT_CIGAM_64: {
+			struct fat_arch_64 header = {};
+			@try {
+				[data getBytes:&header range:NSMakeRange(index, sizeof(header))];
+				slice_offset = header.offset;
+				index += sizeof(struct fat_arch_64);
+			}
+			@catch(NSException *exception) {
+				*is_valid_binary = false;
+				*reason = invalid_header;
+			}
+			break;
+		}
+		default: {
+			break;
+		}
+	}
+
+	if (*is_valid_binary) {
+		parse_header(data, is_valid_binary, reason, NSSwapBigIntToHost(slice_offset));
+	}
+
+	return index;
+}
+
+void parse_signature(NSData* data, bool *is_valid_binary, enum status *reason) {
+
+}
+
 uint64_t parse_header(NSData *data, bool *is_valid_binary, enum status *reason, uint64_t index) {
 
-	struct mach_header binary_header;
+	struct mach_header binary_header = {};
+	
 	@try {
 		[data getBytes:&binary_header range:NSMakeRange(index, sizeof(binary_header))];
 		index += sizeof(binary_header);
@@ -197,9 +255,12 @@ uint64_t parse_header(NSData *data, bool *is_valid_binary, enum status *reason, 
 	}
 
 	if (*is_valid_binary) {
+	
+		bool flip = (binary_header.magic == MH_CIGAM or binary_header.magic == MH_CIGAM_64);
+		
 		switch (binary_header.magic) {
-			case MH_MAGIC_64:
-			case MH_CIGAM_64: {
+			case MH_CIGAM_64:
+			case MH_MAGIC_64: {
 				index += sizeof(uint32_t);
 				break;
 			}
@@ -208,9 +269,66 @@ uint64_t parse_header(NSData *data, bool *is_valid_binary, enum status *reason, 
 			}
 		}
 
-		print_arch(binary_header.cputype, binary_header.cpusubtype);
+		cpu_type_t cputype = (flip ? NSSwapBigIntToHost(binary_header.cputype) : binary_header.cputype);
+		cpu_subtype_t cpusubtype = (flip ? NSSwapBigIntToHost(binary_header.cpusubtype) : binary_header.cpusubtype);
+
+		print_arch(cputype, cpusubtype);
+
+		uint64_t command_count = (flip ? NSSwapBigIntToHost(binary_header.ncmds) : binary_header.ncmds);
+
+		bool found_signature = false;
+		struct lc_code_signature sig_info = {};
+
+		for (uint64_t cmd_index = 0; cmd_index < command_count; cmd_index++) {
+			struct load_command cmd = {};
+			@try {
+				[data getBytes:&cmd range:NSMakeRange(index, sizeof(cmd))];
+			}
+			@catch(NSException *exception) {
+				*is_valid_binary = false;
+				*reason = invalid_binary;
+				break;
+			}
+
+			if (cmd.cmd == LC_CODE_SIGNATURE) {
+				index += sizeof(cmd);
+				
+				@try {
+					[data getBytes:&sig_info range:NSMakeRange(index, sizeof(sig_info))];
+					found_signature = true;
+				}
+				@catch(NSException *exception) {
+					*is_valid_binary = false;
+					*reason = invalid_binary;
+				}
+
+				break;
+			}
+			else {
+				index += cmd.cmdsize;
+			}
+		}
+
+		if (found_signature == true) {
+			NSData *signature;
+			@try {
+				signature = [data subdataWithRange:NSMakeRange(sig_info.offset, sig_info.size)];
+			}
+			@catch(NSException *exception) {
+				*is_valid_binary = false;
+				*reason = invalid_binary;
+			}
+
+			if (*is_valid_binary) {
+				parse_signature(signature, is_valid_binary, reason);
+			}
+			
+		}
+		else {
+			printf("binary has no signature.\n");
+		}
 	}
-	
+
 	return index;
 }
 
@@ -225,7 +343,6 @@ void parse_binary(NSData *data) {
 	uint32_t magic;
 	@try {
 		[data getBytes:&magic range:NSMakeRange(index, sizeof(magic))];
-		index += sizeof(magic);
 	}
 	@catch (NSException *exception) {
 		is_valid_binary = false;
@@ -234,13 +351,18 @@ void parse_binary(NSData *data) {
 
 	switch (magic) {
 		case FAT_MAGIC:
-		case FAT_CIGAM: {
-			printf("multi-arch binary -");
+		case FAT_CIGAM: 
+		case FAT_MAGIC_64: 
+		case FAT_CIGAM_64: {
+			printf("multi-arch binary\n");
+
+			index += sizeof(magic);
 
 			uint32_t architecture_count = 0;
 			@try {
 				[data getBytes:&architecture_count range:NSMakeRange(index, sizeof(architecture_count))];
 				index += sizeof(architecture_count);
+				architecture_count = NSSwapBigIntToHost(architecture_count);
 			}
 			@catch(NSException *exception) {
 				is_valid_binary = false;
@@ -249,23 +371,27 @@ void parse_binary(NSData *data) {
 
 			for (uint32_t arch_index = 0; arch_index < architecture_count; arch_index++) {
 
-				
+				struct fat_arch slice = {};
 
-				index += parse_header(data, &is_valid_binary, &reason, index);
+				@try {
+					[data getBytes:&slice range:NSMakeRange(index, sizeof(slice))];
+				}
+				@catch(NSException *exception) {
+					is_valid_binary = false;
+					CheckError(invalid_header);
+				}
+
+				index = parse_slice_header(data, magic, &is_valid_binary, &reason, index);
 				CheckError(reason);
 			}
 			break;
 		}
 		case MH_MAGIC:			
-		case MH_CIGAM: {
-			printf("32-bit arch binary -");
-			parse_header(data, &is_valid_binary, &reason, 0);
-			break;
-		}
+		case MH_CIGAM:
 		case MH_MAGIC_64:
 		case MH_CIGAM_64: {
-			printf("64-bit arch binary -");
-			parse_header(data, &is_valid_binary, &reason, 0);
+			printf("single arch binary\n");
+			parse_header(data, &is_valid_binary, &reason, index);
 			break;
 		}
 		default: {
@@ -284,6 +410,10 @@ display_error:
 			}
 			case invalid_header: {
 				reason_string = "the specified binary contains a malformed mach-o header";
+				break;
+			}
+			case invalid_binary: {
+				reason_string = "the specified binary is malformed";
 				break;
 			}
 			default: {
