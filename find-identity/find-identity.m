@@ -14,59 +14,58 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 */
 
 #import <Foundation/Foundation.h>
+#import <CoreFoundation/CoreFoundation.h>
+#import <Security/Security.h>
 #import <iso646.h>
 
-static NSDateFormatter *date_formatter = nil;
-
-void set_quarantine_on_file(NSURL *file_url) {
-	if (not date_formatter) {
-		date_formatter = [[NSDateFormatter alloc] init];
+Boolean LookupSigningCertByType(CFDataRef *signing_cert, CFStringRef type) {
+	Boolean found_cert = false;
+	CFTypeRef results = NULL;
+	CFMutableDictionaryRef search = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFDictionaryAddValue(search, kSecClass, kSecClassCertificate);
+	CFDictionaryAddValue(search, kSecMatchSubjectContains, type);
+	CFDictionaryAddValue(search, kSecMatchLimit, kSecMatchLimitAll);
+	OSStatus status = SecItemCopyMatching(search, &results);
+	if (status == errSecSuccess) {
+		status = SecItemExport(results, kSecFormatX509Cert, 0, NULL, signing_cert);
+		if (status == errSecSuccess) {
+			found_cert = true;
+		}
 	}
-	NSError *resource_error = nil;
-	NSDictionary *value = @{
-		@"LSQuarantineAgentBundleIdentifier": @"com.pewpewthespells.quarantine",
-		@"LSQuarantineAgentName": [NSString stringWithFormat:@"%s", getprogname()],
-		@"LSQuarantineTimeStamp": [date_formatter stringFromDate:[NSDate date]],
-		@"LSQuarantineType": @"kLSQuarantineTypeOtherAttachment",
-	};
-	bool was_successful = [file_url setResourceValue:value forKey:NSURLQuarantinePropertiesKey error:&resource_error];
-	if (not was_successful and resource_error) {
-		printf("%s\n", [[resource_error localizedDescription] UTF8String]);
-	}
+	return found_cert;
 }
 
 void usage(void) {
-	printf("Overview: Allows users to add the quarantine flag onto files or directories.\n");
+	printf("Overview: Allows users to quickly look up if they have a valid signing certificate of a specific type.\n");
 	printf("\n");
-	printf("Usage: %s [path]\n", getprogname());
+	printf("Usage: %s [iphone|macos|developerid]\n", getprogname());
 	printf("\n");
 }
 
 int main(int argc, char *argv[]) {
-	int exit_code = 0;
+	Boolean result = 1;
 	@autoreleasepool {
 		NSArray *arguments = [[NSProcessInfo processInfo] arguments];
-		NSString *file_path = [arguments lastObject];
-		NSURL *requested_path = [NSURL fileURLWithPath:file_path];
-		NSFileManager *file_manager = [[NSFileManager alloc] init];
-		BOOL is_directory = NO;
-		bool exists = [file_manager fileExistsAtPath:file_path isDirectory:&is_directory];
-		bool valid_command = ([arguments count] == 2 and exists);
+		NSString *type = [arguments lastObject];
+		CFDataRef signing_cert;
+		bool valid_command = ([arguments count] == 2);
 		if (valid_command) {
-			if (is_directory) {
-				NSDirectoryEnumerator *directory_enumerator = [file_manager enumeratorAtPath:file_path];
-				for (NSString *path in directory_enumerator) {
-					NSURL *found_path = [NSURL fileURLWithPathComponents:@[file_path, path]];
-					set_quarantine_on_file(found_path);
-				}
+			if ([type isEqualToString:@"iphone"]) {
+				result = not LookupSigningCertByType(&signing_cert, CFSTR("iPhone Developer:"));
+			}
+			else if ([type isEqualToString:@"macos"]) {
+				result = not LookupSigningCertByType(&signing_cert, CFSTR("Mac Developer:"));
+			}
+			else if ([type isEqualToString:@"developerid"]) {
+				result = not LookupSigningCertByType(&signing_cert, CFSTR("Developer ID Application:"));
 			}
 			else {
-				set_quarantine_on_file(requested_path);
+				usage();
 			}
 		}
 		else {
 			usage();
 		}
 	}
-	return exit_code;
+	return result;
 }
