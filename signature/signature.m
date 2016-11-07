@@ -358,18 +358,96 @@ uint32_t parse_length(NSData *data, bool *is_valid_binary, enum status *reason, 
 	return index;
 }
 
-uint32_t read_uint32(NSData *data) {
+uint32_t read_uint32(NSData *data, uint32_t offset) {
 	uint32_t value = 0;
 	@try {
-		[data getBytes:&value range:NSMakeRange(0, sizeof(value))];
+		[data getBytes:&value range:NSMakeRange(offset, sizeof(value))];
 	}
 	@finally {
 		return value;
 	}
 }
 
+uint32_t print_data(NSData *data, uint32_t offset) {
+	return offset;
+}
+
+uint32_t print_hash(NSData *data, uint32_t offset) {
+	return offset;
+}
+
+uint32_t print_dot_string(NSData *data, uint32_t offset) {
+	return offset;
+}
+
 void parse_expression(NSData *data, enum SyntaxLevel level) {
-	printf("%08x\n", read_uint32(data));
+	uint32_t offset = 0;
+	enum ExprOp op = (read_uint32(data, offset) & ~opFlagMask);
+	offset += sizeof(offset);
+	switch (op) {
+		case opFalse: {
+			printf("never");
+			break;
+		}
+		case opTrue: {
+			printf("always");
+			break;
+		}
+		case opIdent: {
+			printf("identifier: ");
+			offset = print_data(data, offset);
+			break;
+		}
+		case opAppleAnchor: {
+			printf("anchor apple");
+			break;
+		}
+		case opAppleGenericAnchor: {
+			printf("anchor apple generic");
+			break;
+		}
+		case opAnchorHash: {
+			printf("certificate");
+			uint32_t cert_type = read_uint32(data, offset);
+			switch (cert_type) {
+				case 0: { // leaf cert
+					printf(" leaf");
+					break;
+				}
+				case -1: { // anchor cert
+					printf(" anchor");
+					break;
+				}
+				default: {
+					printf(" %d", cert_type);
+					break;
+				}
+			}
+			offset += sizeof(cert_type);
+			printf(" = ");
+			offset = print_hash(data, offset);
+			break;
+		}
+		case opInfoKeyValue: {
+			printf("info[");
+			offset = print_dot_string(data, offset);
+			printf("] = ");
+			offset = print_data(data, offset);
+			break;
+		}
+		default: {
+			if (op & opGenericFalse) {
+				printf(" false /* opcode %d */", op);
+				break;
+			} else if (op & opGenericSkip) {
+				printf(" /* opcode %d */", op);
+				break;
+			} else {
+				printf("OPCODE %d NOT UNDERSTOOD (ending print)", op);
+				return;
+			}
+		}
+	}
 }
 
 uint32_t parse_blob(NSData *data, bool *is_valid_binary, enum status *reason, uint32_t index) {
@@ -446,6 +524,7 @@ uint32_t parse_blob(NSData *data, bool *is_valid_binary, enum status *reason, ui
 			case kSecCodeMagicRequirement: {
 
 				parse_expression(blob_data, slTop);
+				printf("\n");
 				break;
 			}
 			default: {
