@@ -18,6 +18,46 @@ struct lc_code_signature {
 	uint32_t size;
 };
 
+enum {
+	// semantic bits or'ed into the opcode
+	opFlagMask =	 0xFF000000,	// high bit flags
+	opGenericFalse = 0x80000000,	// has size field; okay to default to false
+	opGenericSkip =  0x40000000,	// has size field; skip and continue
+};
+
+enum SyntaxLevel {
+	slPrimary,	// syntax primary
+	slAnd,			// conjunctive
+	slOr,		 // disjunctive
+	slTop		 // where we start
+};
+
+enum ExprOp {
+	opFalse,						// unconditionally false
+	opTrue,																									// unconditionally true
+	opIdent,						// match canonical code [string]
+	opAppleAnchor,									// signed by Apple as Apple's product
+	opAnchorHash,						 // match anchor [cert hash]
+	opInfoKeyValue,																	// *legacy* - use opInfoKeyField [key; value]
+	opAnd,													// binary prefix expr AND expr [expr; expr]
+	opOr,									// binary prefix expr OR expr [expr; expr]
+	opCDHash,							  // match hash of CodeDirectory directly [cd hash]
+	opNot,							// logical inverse [expr]
+	opInfoKeyField,					// Info.plist key field [string; match suffix]
+	opCertField,					// Certificate field [cert index; field name; match suffix]
+	opTrustedCert,					// require trust settings to approve one particular cert [cert index]
+	opTrustedCerts,					// require trust settings to approve the cert chain
+	opCertGeneric,					// Certificate component by OID [cert index; oid; match suffix]
+	opAppleGenericAnchor,			// signed by Apple in any capacity
+	opEntitlementField,				// entitlement dictionary field [string; match suffix]
+	opCertPolicy,					// Certificate policy by OID [cert index; oid; match suffix]
+	opNamedAnchor,					// named anchor type
+	opNamedCode,					// named subroutine
+	opPlatform,						// platform constraint [integer]
+	exprOpCount						// (total opcode count in use)
+};
+
+
 void print_vax(cpu_subtype_t type) {
 	switch(type) {
 		case CPU_SUBTYPE_VAX_ALL: { printf("- any"); break; }
@@ -318,6 +358,20 @@ uint32_t parse_length(NSData *data, bool *is_valid_binary, enum status *reason, 
 	return index;
 }
 
+uint32_t read_uint32(NSData *data) {
+	uint32_t value = 0;
+	@try {
+		[data getBytes:&value range:NSMakeRange(0, sizeof(value))];
+	}
+	@finally {
+		return value;
+	}
+}
+
+void parse_expression(NSData *data, enum SyntaxLevel level) {
+	printf("%08x\n", read_uint32(data));
+}
+
 uint32_t parse_blob(NSData *data, bool *is_valid_binary, enum status *reason, uint32_t index) {
 
 	uint32_t blob_offset = index;
@@ -346,6 +400,8 @@ uint32_t parse_blob(NSData *data, bool *is_valid_binary, enum status *reason, ui
 			*reason = invalid_signature_format;
 		}
 
+		uint32_t child_end_offset = 0;
+
 		printf("\tchildren: %d\n", child_count);
 
 		for (uint32_t child = 0; child < child_count; child++) {
@@ -368,22 +424,28 @@ uint32_t parse_blob(NSData *data, bool *is_valid_binary, enum status *reason, ui
 				break;
 			}
 
-			parse_blob(data, is_valid_binary, reason, blob_offset + child_offset);
+			child_end_offset = parse_blob(data, is_valid_binary, reason, blob_offset + child_offset);
 
 		}
 
+		index = child_end_offset;
+		
 	}
 	else {
+
+		NSData *blob_data = [data subdataWithRange:NSMakeRange(index, blob_length)];
+		
 		switch (magic) {
 			case kSecCodeMagicEntitlement: {
 
-				NSData *plist_data = [data subdataWithRange:NSMakeRange(index, blob_length)];
-				id plist = [NSPropertyListSerialization propertyListWithData:plist_data options:0 format:nil error:nil];
+				id plist = [NSPropertyListSerialization propertyListWithData:blob_data options:0 format:nil error:nil];
 				const char *entitlement_string = [[plist description] UTF8String];
 				printf("contents: %s\n",entitlement_string);
 				break;
 			}
 			case kSecCodeMagicRequirement: {
+
+				parse_expression(blob_data, slTop);
 				break;
 			}
 			default: {
@@ -391,7 +453,7 @@ uint32_t parse_blob(NSData *data, bool *is_valid_binary, enum status *reason, ui
 			}
 		}
 	
-		index += blob_length;
+		index += (blob_length - sizeof(magic) - sizeof(blob_length));
 	}
 
 	return index;
@@ -408,7 +470,17 @@ void parse_signature(NSData *data, bool *is_valid_binary, enum status *reason) {
 
 		index = parse_blob(data, is_valid_binary, reason, index);
 		bool index_within_bounds = (index < [data length]);
-		can_parse_blobs = (index_within_bounds and *is_valid_binary);
+
+		bool read_successful = true;
+		uint32_t read_test = 0;
+		@try {
+			[data getBytes:&read_test range:NSMakeRange(index, sizeof(read_test))];
+		}
+		@catch(NSException *exception) {
+			read_successful = false;
+		}
+		
+		can_parse_blobs = (index_within_bounds and *is_valid_binary and (read_test != 0 and read_successful));
 	}
 }
 
@@ -493,7 +565,7 @@ uint64_t parse_header(NSData *data, bool *is_valid_binary, enum status *reason, 
 			if (*is_valid_binary) {
 				parse_signature(signature, is_valid_binary, reason);
 			}
-			
+			 
 		}
 		else {
 			printf("binary has no signature.\n");
@@ -505,7 +577,9 @@ uint64_t parse_header(NSData *data, bool *is_valid_binary, enum status *reason, 
 
 void parse_binary(NSData *data) {
 	enum status reason = success;
+	
 #define CheckError(code) do { if (not is_valid_binary) { reason = code; goto display_error; } } while(0)
+
 	bool is_valid_binary = ([data length] > 0);
 	CheckError(too_short);
 

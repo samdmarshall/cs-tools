@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>com.pewpewthespells.siginfo</string>
+	<string>com.pewpewthespells.signature</string>
 	<key>CFBundleName</key>
-	<string>siginfo</string>
+	<string>signature</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundlePackageType</key>
