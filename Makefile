@@ -1,5 +1,5 @@
-.PHONY: pre-build all find-identity guardian vaccine quarantine siginfo clean
-all: clean pre-build find-identity guardian vaccine quarantine siginfo
+.PHONY: pre-build all find-identity guardian vaccine quarantine signature clean
+all: clean pre-build find-identity guardian vaccine quarantine signature
 
 pre-build: 
 	mkdir -p build
