@@ -3,12 +3,14 @@
 #import <mach-o/fat.h>
 #import <mach-o/loader.h>
 #import <mach/machine.h>
+#import "CSCommonPriv.h"
 
 enum status {
 	success = 0,
 	too_short,
 	invalid_header,
 	invalid_binary,
+	invalid_signature_format,
 };
 
 struct lc_code_signature {
@@ -237,8 +239,177 @@ uint64_t parse_slice_header(NSData *data, uint32_t magic, bool *is_valid_binary,
 	return index;
 }
 
-void parse_signature(NSData* data, bool *is_valid_binary, enum status *reason) {
+uint32_t parse_magic(NSData *data, bool *is_valid_binary, enum status *reason, uint32_t index, uint32_t *magic_value) {
 
+	uint32_t magic = 0;
+	
+	@try {
+		[data getBytes:&magic range:NSMakeRange(index, sizeof(magic))];
+		index += sizeof(magic);
+		*magic_value = OSSwapHostToBigInt32(magic);
+	}
+	@catch(NSException *exception) {
+		*is_valid_binary = false;
+		*reason = invalid_signature_format;
+	}
+
+	if (*is_valid_binary) {
+		printf("found: ");
+
+		switch(*magic_value) {
+			case kSecCodeMagicRequirement: {
+				printf("single requirement\n");
+				break;
+			}
+			case kSecCodeMagicRequirementSet: {
+				printf("requirement set\n");
+				break;
+			}
+			case kSecCodeMagicCodeDirectory: {
+				printf("codedirectory\n");
+				break;
+			}
+			case kSecCodeMagicEmbeddedSignature: {
+				printf("single-architecture embedded signature\n");
+				break;
+			}
+			case kSecCodeMagicDetachedSignature: {
+				printf("detached multi-architecture signature\n");
+				break;
+			}
+			case kSecCodeMagicEntitlement: {
+				printf("entitlement blob\n");
+				break;
+			}
+			default: {
+				uint8_t value = (magic & 0x00ff0000) >> 16;
+				if (value == 0x0b) {
+					printf("generic\n");
+				}
+				else {
+					printf("%08x\n", *magic_value);
+				}
+				break;
+			}
+		}
+	}
+
+	return index;
+}
+
+uint32_t parse_length(NSData *data, bool *is_valid_binary, enum status *reason, uint32_t index, uint32_t *blob_length) {
+
+	uint32_t length = 0;
+	
+	@try {
+		[data getBytes:&length range:NSMakeRange(index, sizeof(length))];
+		index += sizeof(length);
+	}
+	@catch(NSException *exception) {
+		*is_valid_binary = false;
+		*reason = invalid_signature_format;
+	}
+
+	if (*is_valid_binary) {
+
+		*blob_length = OSSwapHostToBigInt32(length);
+	}
+
+	return index;
+}
+
+uint32_t parse_blob(NSData *data, bool *is_valid_binary, enum status *reason, uint32_t index) {
+
+	uint32_t blob_offset = index;
+
+	uint32_t magic = 0;
+	index = parse_magic(data, is_valid_binary, reason, index, &magic);
+
+	uint32_t blob_length = 0;
+	index = parse_length(data, is_valid_binary, reason, index, &blob_length);
+
+	printf("length: %d\n", blob_length);
+
+	bool has_children = (magic == kSecCodeMagicEmbeddedSignature
+							or magic == kSecCodeMagicDetachedSignature);
+
+	if (has_children) {
+
+		uint32_t child_count = 0;
+		@try {
+			[data getBytes:&child_count range:NSMakeRange(index, sizeof(child_count))];
+			index += sizeof(child_count);
+			child_count = OSSwapHostToBigInt32(child_count);
+		}
+		@catch(NSException *exception) {
+			*is_valid_binary = false;
+			*reason = invalid_signature_format;
+		}
+
+		printf("\tchildren: %d\n", child_count);
+
+		for (uint32_t child = 0; child < child_count; child++) {
+
+			uint32_t header = 0;
+			uint32_t child_offset = 0;
+			
+			@try {
+				[data getBytes:&header range:NSMakeRange(index, sizeof(header))];
+				index += sizeof(header);
+				header = OSSwapHostToBigInt32(header);
+
+				[data getBytes:&child_offset range:NSMakeRange(index, sizeof(child_offset))];
+				index += sizeof(child_offset);
+				child_offset = OSSwapHostToBigInt32(child_offset);
+			}
+			@catch(NSException *exception) {
+				*is_valid_binary = false;
+				*reason = invalid_signature_format;
+				break;
+			}
+
+			parse_blob(data, is_valid_binary, reason, blob_offset + child_offset);
+
+		}
+
+	}
+	else {
+		switch (magic) {
+			case kSecCodeMagicEntitlement: {
+
+				NSData *plist_data = [data subdataWithRange:NSMakeRange(index, blob_length)];
+				id plist = [NSPropertyListSerialization propertyListWithData:plist_data options:0 format:nil error:nil];
+				const char *entitlement_string = [[plist description] UTF8String];
+				printf("contents: %s\n",entitlement_string);
+				break;
+			}
+			case kSecCodeMagicRequirement: {
+				break;
+			}
+			default: {
+				break;
+			}
+		}
+	
+		index += blob_length;
+	}
+
+	return index;
+	
+}
+
+void parse_signature(NSData *data, bool *is_valid_binary, enum status *reason) {
+
+	uint32_t index = 0;
+
+	bool can_parse_blobs = true;
+
+	while (can_parse_blobs) {
+
+		index = parse_blob(data, is_valid_binary, reason, index);
+		bool index_within_bounds = (index < [data length]);
+		can_parse_blobs = (index_within_bounds and *is_valid_binary);
+	}
 }
 
 uint64_t parse_header(NSData *data, bool *is_valid_binary, enum status *reason, uint64_t index) {
@@ -414,6 +585,10 @@ display_error:
 			}
 			case invalid_binary: {
 				reason_string = "the specified binary is malformed";
+				break;
+			}
+			case invalid_signature_format: {
+				reason_string = "invalid signature format";
 				break;
 			}
 			default: {
