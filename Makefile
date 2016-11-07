@@ -6,7 +6,7 @@ pre-build:
 
 sign-product:
 	@test -f build/find-identity || $(MAKE) find-identity
-	./build/find-identity developerid && codesign --sign "Developer ID" build/$(PRODUCT_NAME)
+	-./build/find-identity developerid && codesign --sign "Developer ID" build/$(PRODUCT_NAME)
 	@./build/find-identity developerid || echo "Skipping signing as we could not find a valid Developer ID signing Identity"
 
 find-identity: export PRODUCT_NAME = find-identity
