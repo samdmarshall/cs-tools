@@ -759,6 +759,8 @@ void usage(void) {
 	printf("\n");
 }
 
+#pragma mark - 
+
 int main(int argc, char *argv[]) {
 	@autoreleasepool {
 		NSArray *arguments = [[NSProcessInfo processInfo] arguments];
